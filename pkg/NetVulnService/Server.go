@@ -4,32 +4,77 @@ import (
 	"fmt"
 	"github.com/Ullaakut/nmap/v2"
 	"golang.org/x/net/context"
-	"log"
+	"google.golang.org/grpc"
+	"net"
 	"strconv"
+	"wrappernmap/pkg/logger"
 	"wrappernmap/pkg/protofiles"
 )
 
 type Server struct {
+	log logger.ILogger
 	protofiles.UnimplementedNetVulnServiceServer
+}
+
+func InitServer(logger logger.ILogger) *Server {
+	srv := &Server{}
+	srv.log = logger
+	return srv
+}
+
+func StartMyMicroservice(ctx context.Context, addr string, logger logger.ILogger) error {
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("cant listen on port : %w", err)
+	}
+	server := grpc.NewServer()
+	srv := InitServer(logger)
+	protofiles.RegisterNetVulnServiceServer(server, srv)
+	go func() {
+		err := server.Serve(lis)
+		if err != nil {
+			logger.Fatalf("err in Serve: %d", err)
+		}
+	}()
+	func() {
+		<-ctx.Done()
+		server.Stop()
+	}()
+	return nil
 }
 
 func (s *Server) CheckVuln(ctx context.Context, req *protofiles.CheckVulnRequest) (*protofiles.CheckVulnResponse, error) {
 	targets := req.GetTargets() //IP addresses
 	ports := req.GetTcpPort()   // only TCP ports
-	results, err := GetLogic(targets, ports)
-	if err != nil {
-		log.Printf("Err in GetLogic: %d", err)
-		return nil, err
-	}
+	resultsChan := make(chan []*protofiles.TargetResult)
+	var res []*protofiles.TargetResult
+	s.log.Infoln("new connection")
+	go func() {
+		results, err := s.GetLogic(targets, ports)
+		if err != nil {
+			s.log.Errorln("Err in GetLogic: %d", err)
+			resultsChan <- nil
+		}
+		resultsChan <- results
+	}()
 
-	return &protofiles.CheckVulnResponse{Results: results}, nil
+	select {
+	case <-ctx.Done():
+		s.log.Println("request canceled")
+		return nil, fmt.Errorf("request canceled")
+	case res = <-resultsChan:
+		if res == nil {
+			return nil, fmt.Errorf("err in Get Logic")
+		}
+	}
+	return &protofiles.CheckVulnResponse{Results: res}, nil
 }
 
-func ScanHosts(targets []string, ports []int32) ([]nmap.Host, error) {
+func (s *Server) ScanHosts(targets []string, ports []int32) ([]nmap.Host, error) {
 	// Equivalent to
 	// nmap -sV -scrips=valnures -T4 192.168.0.0/24 .
 	scanner, err := nmap.NewScanner(
-		nmap.WithTargets(targets...), //"localhost""\""+targets[0]+"\""
+		nmap.WithTargets(targets...), //"localhost"
 		nmap.WithScripts("vulners"),
 		nmap.WithPorts(ConvInt32toSet(ports)...),
 		nmap.WithServiceInfo(),
@@ -45,25 +90,29 @@ func ScanHosts(targets []string, ports []int32) ([]nmap.Host, error) {
 			}
 			return false
 		}),
+		nmap.WithFilterPort(func(p nmap.Port) bool {
+			// Filter out ports with no open ports.
+			return p.State.String() == "open"
+		}),
 	)
 
 	if err != nil {
-		log.Fatalf("unable to create nmap scanner: %v", err)
+		s.log.Fatalf("unable to create nmap scanner: %v", err)
 		return nil, err
 	}
 
 	result, _, err := scanner.Run()
 	if err != nil {
-		log.Fatalf("nmap scan failed: %v", err)
+		s.log.Fatalf("nmap scan failed: %v", err)
 		return nil, err
 	}
 	return result.Hosts, nil
 }
 
-func GetLogic(targets []string, ports []int32) ([]*protofiles.TargetResult, error) {
-	hosts, err := ScanHosts(targets, ports)
+func (s *Server) GetLogic(targets []string, ports []int32) ([]*protofiles.TargetResult, error) {
+	hosts, err := s.ScanHosts(targets, ports)
 	if err != nil {
-		log.Fatalf("scan hosts failed: %v", err)
+		s.log.Fatalf("scan hosts failed: %v", err)
 		return nil, err
 	}
 
@@ -76,11 +125,13 @@ func GetLogic(targets []string, ports []int32) ([]*protofiles.TargetResult, erro
 		for _, port := range host.Ports {
 			vulns := make([]*protofiles.Vulnerability, 0)
 			fmt.Println(port.ID)
+			fmt.Println(port)
+			fmt.Println(port.Service)
 			for _, elem := range port.Scripts {
 				for _, table := range elem.Tables {
 					//table -таблица с таблицей уязвимостей
 					for _, re := range table.Tables {
-						vulnerability := GetVulner(&re)
+						vulnerability := s.GetVulner(&re)
 						vulns = append(vulns, vulnerability)
 					}
 				}
@@ -98,7 +149,7 @@ func GetLogic(targets []string, ports []int32) ([]*protofiles.TargetResult, erro
 	return ans, nil
 }
 
-func GetVulner(re *nmap.Table) *protofiles.Vulnerability {
+func (s *Server) GetVulner(re *nmap.Table) *protofiles.Vulnerability {
 	var cvss = float32(0)
 	var idVuln string
 	for _, values := range re.Elements {
@@ -108,10 +159,10 @@ func GetVulner(re *nmap.Table) *protofiles.Vulnerability {
 		}
 		if values.Key == "cvss" {
 			fmt.Println("cvss:", values.Value)
-			if cvssTample, err := strconv.ParseFloat(values.Value, 32); err == nil {
-				cvss = float32(cvssTample)
+			if cvssTemple, err := strconv.ParseFloat(values.Value, 32); err == nil {
+				cvss = float32(cvssTemple)
 			} else {
-				log.Printf("err in parse %d:", err)
+				s.log.Printf("err in parse %d:", err)
 			}
 		}
 	}

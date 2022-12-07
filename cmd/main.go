@@ -1,27 +1,48 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"google.golang.org/grpc"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"log"
-	"net"
 	"wrappernmap/pkg/NetVulnService"
-	"wrappernmap/pkg/protofiles"
 )
 
 func main() {
 	fmt.Println("Is's starts")
-	s := grpc.NewServer()
-	srv := &NetVulnService.Server{}
-	protofiles.RegisterNetVulnServiceServer(s, srv)
+	if err := initConfig(); err != nil {
+		log.Fatalf("ошибка инициализации configs: %s", err.Error())
+	}
+	logger := InitLogger()
 
-	l, err := net.Listen("tcp", ":8080")
+	port := viper.GetString("port")
+	if port == "" {
+		port = "8080"
+	}
+	port = ":" + port
+	ctx := context.Background()
+	err := NetVulnService.StartMyMicroservice(ctx, port, logger)
 	if err != nil {
-		log.Fatalf("Err in listen: %d", err)
-		return
+		logger.Fatalf("err in start microservice: %d", err)
 	}
-	if err := s.Serve(l); err != nil {
-		log.Fatalf("Err in serve: %d", err)
-		return
+
+}
+func InitLogger() *logrus.Logger {
+	logger := logrus.New()
+
+	level := viper.GetString("loglevel")
+	parsedLevel, err := logrus.ParseLevel(level)
+	if err != nil {
+
+		return nil
 	}
+	logger.SetLevel(parsedLevel)
+	return logger
+}
+
+func initConfig() error {
+	viper.AddConfigPath("configs")
+	viper.SetConfigName("config")
+	return viper.ReadInConfig()
 }

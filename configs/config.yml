@@ -1,0 +1,10 @@
+port: "8080"
+loglevel : "info"
+
+#panic
+#fatal
+#error
+#warn or warning
+#info
+#debug
+#trace
