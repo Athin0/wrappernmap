@@ -61,7 +61,7 @@ float cvss_score = 2;
 ####Отчистить бинарник
 `make clean`  
 ####Запуск тестов:  
-`   make tests   `  
+`   make test   `  
 ####Запуск линтера:  
 `   make lint   `
 

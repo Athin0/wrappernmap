@@ -19,6 +19,6 @@ clean:
 lint:
 	golangci-lint run
 
-tests:
+test:
 	go test
 
