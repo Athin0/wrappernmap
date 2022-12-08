@@ -27,7 +27,7 @@ func wait(amout int) {
 // утилитарная функция для коннекта к серверу
 func getGrpcConn(t *testing.T, port string) *grpc.ClientConn {
 	grpcConn, err := grpc.Dial(
-		listenPort,
+		port,
 		grpc.WithInsecure(),
 	)
 	if err != nil {
@@ -63,7 +63,6 @@ func TestServerStartStop(t *testing.T) {
 }
 
 func TestServerLeak(t *testing.T) {
-	//return
 	goroutinesStart := runtime.NumGoroutine()
 	TestServerStartStop(t)
 	goroutinesPerTwoIterations := runtime.NumGoroutine() - goroutinesStart
