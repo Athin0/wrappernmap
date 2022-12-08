@@ -2,6 +2,7 @@ package logger
 
 import "github.com/sirupsen/logrus"
 
+// ILogger using standard methods of Logrus
 type ILogger interface {
 	Tracef(format string, args ...interface{})
 	Debugf(format string, args ...interface{})

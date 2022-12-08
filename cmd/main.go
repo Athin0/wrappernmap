@@ -26,11 +26,18 @@ func main() {
 	if err != nil {
 		logger.Fatalf("err in start microservice: %d", err)
 	}
-
+	<-ctx.Done()
 }
+
+func initConfig() error {
+	viper.AddConfigPath("configs")
+	viper.SetConfigName("config")
+	return viper.ReadInConfig()
+}
+
+// InitLogger create Logrus logger with params from config
 func InitLogger() *logrus.Logger {
 	logger := logrus.New()
-
 	level := viper.GetString("loglevel")
 	parsedLevel, err := logrus.ParseLevel(level)
 	if err != nil {
@@ -39,10 +46,4 @@ func InitLogger() *logrus.Logger {
 	}
 	logger.SetLevel(parsedLevel)
 	return logger
-}
-
-func initConfig() error {
-	viper.AddConfigPath("configs")
-	viper.SetConfigName("config")
-	return viper.ReadInConfig()
 }

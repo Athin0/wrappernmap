@@ -9,6 +9,9 @@ run:
 
 build_and_run: build run
 
+run2:
+	go run cmd/main.go
+
 clean:
 	go clean
 	rm ${BINARY_NAME}

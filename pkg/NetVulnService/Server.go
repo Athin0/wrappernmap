@@ -36,7 +36,7 @@ func StartMyMicroservice(ctx context.Context, addr string, logger logger.ILogger
 			logger.Fatalf("err in Serve: %d", err)
 		}
 	}()
-	func() {
+	go func() {
 		<-ctx.Done()
 		server.Stop()
 	}()
@@ -52,15 +52,15 @@ func (s *Server) CheckVuln(ctx context.Context, req *protofiles.CheckVulnRequest
 	go func() {
 		results, err := s.GetLogic(targets, ports)
 		if err != nil {
-			s.log.Errorln("Err in GetLogic: %d", err)
+			s.log.Fatalf("Err in GetLogic: %d", err)
 			resultsChan <- nil
 		}
 		resultsChan <- results
 	}()
 
 	select {
-	case <-ctx.Done():
-		s.log.Println("request canceled")
+	case <-ctx.Done(): //cancel function execution on context done
+		s.log.Infoln("request canceled")
 		return nil, fmt.Errorf("request canceled")
 	case res = <-resultsChan:
 		if res == nil {
@@ -75,8 +75,8 @@ func (s *Server) ScanHosts(targets []string, ports []int32) ([]nmap.Host, error)
 	// nmap -sV -scrips=valnures -T4 192.168.0.0/24 .
 	scanner, err := nmap.NewScanner(
 		nmap.WithTargets(targets...), //"localhost"
-		nmap.WithScripts("vulners"),
-		nmap.WithPorts(ConvInt32toSet(ports)...),
+		nmap.WithScripts("vulners"),  //our script with list of vulnerable
+		nmap.WithPorts(int32toSet(ports)...),
 		nmap.WithServiceInfo(),
 		nmap.WithTimingTemplate(nmap.TimingAggressive),
 		nmap.WithVersionAll(),
@@ -91,7 +91,7 @@ func (s *Server) ScanHosts(targets []string, ports []int32) ([]nmap.Host, error)
 			return false
 		}),
 		nmap.WithFilterPort(func(p nmap.Port) bool {
-			// Filter out ports with no open ports.
+			// Filter out no open ports.
 			return p.State.String() == "open"
 		}),
 	)
@@ -109,6 +109,7 @@ func (s *Server) ScanHosts(targets []string, ports []int32) ([]nmap.Host, error)
 	return result.Hosts, nil
 }
 
+// GetLogic create list of targets
 func (s *Server) GetLogic(targets []string, ports []int32) ([]*protofiles.TargetResult, error) {
 	hosts, err := s.ScanHosts(targets, ports)
 	if err != nil {
@@ -118,15 +119,13 @@ func (s *Server) GetLogic(targets []string, ports []int32) ([]*protofiles.Target
 
 	ans := make([]*protofiles.TargetResult, 0)
 	for _, host := range hosts {
-		fmt.Printf("Host %s\n", host.Addresses[0])
+		s.log.Infof("Host %s\n", host.Addresses[0])
 		targ := &protofiles.TargetResult{Target: host.Addresses[0].Addr}
 		services := make([]*protofiles.Service, 0)
 
 		for _, port := range host.Ports {
 			vulns := make([]*protofiles.Vulnerability, 0)
-			fmt.Println(port.ID)
-			fmt.Println(port)
-			fmt.Println(port.Service)
+			s.log.Infoln(port)
 			for _, elem := range port.Scripts {
 				for _, table := range elem.Tables {
 					//table -таблица с таблицей уязвимостей
@@ -149,26 +148,29 @@ func (s *Server) GetLogic(targets []string, ports []int32) ([]*protofiles.Target
 	return ans, nil
 }
 
+// GetVulner get vulnerabilities list from response tables
 func (s *Server) GetVulner(re *nmap.Table) *protofiles.Vulnerability {
 	var cvss = float32(0)
 	var idVuln string
 	for _, values := range re.Elements {
 		if values.Key == "id" {
-			fmt.Println("id:", values.Value)
+			s.log.Infoln("id:", values.Value)
 			idVuln = values.Value
 		}
 		if values.Key == "cvss" {
-			fmt.Println("cvss:", values.Value)
+			s.log.Infof("cvss:", values.Value)
 			if cvssTemple, err := strconv.ParseFloat(values.Value, 32); err == nil {
 				cvss = float32(cvssTemple)
 			} else {
-				s.log.Printf("err in parse %d:", err)
+				s.log.Errorln("err in parse %d:", err)
 			}
 		}
 	}
 	return &protofiles.Vulnerability{Identifier: idVuln, CvssScore: cvss}
 }
-func ConvInt32toSet(in []int32) (out []string) {
+
+//utility function for conversion
+func int32toSet(in []int32) (out []string) {
 	out = make([]string, len(in))
 	for i, a := range in {
 		out[i] = strconv.Itoa(int(a))
